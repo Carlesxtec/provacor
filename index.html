@@ -161,13 +161,22 @@
         import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
 
         let scene, camera, renderer, controls;
-        let heartGroup, leftHalf, rightHalf, bloodGroup, labelGroup;
+        let heartGroup, leftHalf, rightHalf, bloodGroup, labelGroup, vrUiGroup;
         
         let bpm = 75;
         let openAmount = 0;
         let showBlood = true;
         let showLabels = true;
         let isExploded = false;
+
+        // Variables d'interacció VR (Grab/Touch)
+        let controllers = [];
+        let hands = [];
+        let grabbedObject = null;
+        let grabOffset = new THREE.Vector3();
+        let vrButtons = [];
+        const raycaster = new THREE.Raycaster();
+        const tempMatrix = new THREE.Matrix4();
 
         init();
 
@@ -195,10 +204,10 @@
             controls.target.set(0, 1.2, 0);
 
             // 5. Llums
-            const ambientLight = new THREE.AmbientLight(0xffffff, 2.0);
+            const ambientLight = new THREE.AmbientLight(0xffffff, 2.2);
             scene.add(ambientLight);
 
-            const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+            const dirLight = new THREE.DirectionalLight(0xffffff, 1.8);
             dirLight.position.set(2, 4, 3);
             scene.add(dirLight);
 
@@ -210,6 +219,7 @@
             buildHeartModel();
             buildBloodSystem();
             buildLabels();
+            buildVRFloatingUI(); // Panell 3D en VR
 
             // 8. Controladors de mans i comandaments de Meta Quest
             setupXRInputs();
@@ -224,6 +234,7 @@
             renderer.setAnimationLoop(animate);
         }
 
+        /* ... existing code for setupVRButton ... */
         function setupVRButton() {
             const vrBtn = document.getElementById('start-vr-btn');
             const vrText = document.getElementById('vr-btn-text');
@@ -276,7 +287,8 @@
 
         function buildHeartModel() {
             heartGroup = new THREE.Group();
-            heartGroup.position.set(0, 1.25, 0);
+            heartGroup.position.set(0, 1.25, -0.2); // Posicionat a l'abast de la mà
+            heartGroup.userData = { isSelectable: true };
             scene.add(heartGroup);
 
             leftHalf = new THREE.Group();
@@ -383,27 +395,182 @@
             });
         }
 
+        // Construcció del Panell de Control 3D Flotant per a VR
+        function buildVRFloatingUI() {
+            vrUiGroup = new THREE.Group();
+            vrUiGroup.position.set(0.45, 1.2, -0.2);
+            vrUiGroup.rotation.y = -0.4;
+            scene.add(vrUiGroup);
+
+            // Fons del Panell 3D
+            const panelMat = new THREE.MeshStandardMaterial({
+                color: 0x0f172a,
+                roughness: 0.2,
+                metalness: 0.5,
+                transparent: true,
+                opacity: 0.85
+            });
+            const panelGeom = new THREE.BoxGeometry(0.32, 0.42, 0.01);
+            const panel = new THREE.Mesh(panelGeom, panelMat);
+            vrUiGroup.add(panel);
+
+            // Llista de Botons VR
+            const btnDefs = [
+                { label: "BPM +", action: () => setBPM(bpm + 15), y: 0.14 },
+                { label: "BPM -", action: () => setBPM(bpm - 15), y: 0.06 },
+                { label: "OBRIR / TANCAR", action: () => toggleExplodeVR(), y: -0.02 },
+                { label: "SANG ON/OFF", action: () => toggleBloodVR(), y: -0.10 },
+                { label: "REINICIAR", action: () => resetVR(), y: -0.18 }
+            ];
+
+            vrButtons = [];
+            btnDefs.forEach(btn => {
+                const btnMesh = createVRButtonMesh(btn.label);
+                btnMesh.position.set(0, btn.y, 0.015);
+                btnMesh.userData = { action: btn.action, isVRBtn: true };
+                vrUiGroup.add(btnMesh);
+                vrButtons.push(btnMesh);
+            });
+        }
+
+        function createVRButtonMesh(text) {
+            const group = new THREE.Group();
+
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = "#1e293b";
+            ctx.fillRect(0, 0, 256, 64);
+            ctx.strokeStyle = "#ef4444";
+            ctx.lineWidth = 6;
+            ctx.strokeRect(4, 4, 248, 56);
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "bold 22px sans-serif";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(text, 128, 32);
+
+            const tex = new THREE.CanvasTexture(canvas);
+            const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.3 });
+            const geom = new THREE.BoxGeometry(0.26, 0.065, 0.012);
+            const mesh = new THREE.Mesh(geom, mat);
+            group.add(mesh);
+            group.userData.mesh = mesh;
+
+            return group;
+        }
+
         function setupXRInputs() {
             const handModelFactory = new XRHandModelFactory();
 
-            // Hand 1
-            const hand1 = renderer.xr.getHand(0);
-            hand1.add(handModelFactory.createHandModel(hand1, "mesh"));
-            scene.add(hand1);
+            // Controladors Touch (0 i 1)
+            for (let i = 0; i < 2; i++) {
+                const controller = renderer.xr.getController(i);
+                controller.addEventListener('selectstart', onSelectStart);
+                controller.addEventListener('selectend', onSelectEnd);
+                scene.add(controller);
+                controllers.push(controller);
 
-            // Hand 2
-            const hand2 = renderer.xr.getHand(1);
-            hand2.add(handModelFactory.createHandModel(hand2, "mesh"));
-            scene.add(hand2);
+                // Línia punter per apuntar en VR
+                const lineGeom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]);
+                const lineMat = new THREE.LineBasicMaterial({ color: 0xef4444 });
+                const line = new THREE.Line(lineGeom, lineMat);
+                line.name = 'rayline';
+                line.scale.z = 2;
+                controller.add(line);
+            }
+
+            // Mans amb Hand Tracking (0 i 1)
+            for (let i = 0; i < 2; i++) {
+                const hand = renderer.xr.getHand(i);
+                hand.add(handModelFactory.createHandModel(hand, "mesh"));
+                hand.addEventListener('pinchstart', onSelectStart);
+                hand.addEventListener('pinchend', onSelectEnd);
+                scene.add(hand);
+                hands.push(hand);
+            }
+        }
+
+        // Selecció i Agarrat en VR
+        function onSelectStart(event) {
+            const controller = event.target;
+
+            // Comprovar si s'apunta/toca un botó del panell VR
+            tempMatrix.identity().extractRotation(controller.matrixWorld);
+            raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+            raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+
+            const btnIntersects = raycaster.intersectObjects(vrButtons, true);
+            if (btnIntersects.length > 0) {
+                let target = btnIntersects[0].object;
+                while (target && !target.userData.isVRBtn && target.parent) {
+                    target = target.parent;
+                }
+                if (target && target.userData.action) {
+                    target.userData.action();
+                    return;
+                }
+            }
+
+            // Agarrar el Cor per moure'l/rotar-lo
+            const heartIntersects = raycaster.intersectObject(heartGroup, true);
+            if (heartIntersects.length > 0 || controller.position.distanceTo(heartGroup.position) < 0.35) {
+                grabbedObject = heartGroup;
+                controller.add(heartGroup); // Vincula el cor a la mà/controlador
+            }
+        }
+
+        function onSelectEnd(event) {
+            if (grabbedObject) {
+                scene.add(grabbedObject); // Retorna el cor a l'escena global
+                grabbedObject = null;
+            }
+        }
+
+        function setBPM(val) {
+            bpm = Math.max(30, Math.min(180, val));
+            document.getElementById('bpm-slider').value = bpm;
+            document.getElementById('bpm-value').textContent = bpm + " BPM";
+        }
+
+        function toggleExplodeVR() {
+            isExploded = !isExploded;
+            openAmount = isExploded ? 0.75 : 0;
+            document.getElementById('cut-slider').value = isExploded ? 75 : 0;
+            document.getElementById('cut-value').textContent = (isExploded ? 75 : 0) + "%";
+            applyHeartOpening();
+        }
+
+        function toggleBloodVR() {
+            showBlood = !showBlood;
+            bloodGroup.visible = showBlood;
+            document.getElementById('toggle-blood').checked = showBlood;
+        }
+
+        function resetVR() {
+            bpm = 75;
+            openAmount = 0;
+            isExploded = false;
+            showBlood = true;
+            bloodGroup.visible = true;
+            document.getElementById('bpm-slider').value = 75;
+            document.getElementById('cut-slider').value = 0;
+            document.getElementById('bpm-value').textContent = "75 BPM";
+            document.getElementById('cut-value').textContent = "0%";
+            document.getElementById('toggle-blood').checked = true;
+            applyHeartOpening();
+
+            if (heartGroup) {
+                scene.add(heartGroup);
+                heartGroup.position.set(0, 1.25, -0.2);
+                heartGroup.rotation.set(0, 0, 0);
+            }
         }
 
         function setupUI() {
             const bpmSlider = document.getElementById('bpm-slider');
-            const bpmVal = document.getElementById('bpm-value');
-            bpmSlider.addEventListener('input', (e) => {
-                bpm = parseInt(e.target.value);
-                bpmVal.textContent = bpm + " BPM";
-            });
+            bpmSlider.addEventListener('input', (e) => setBPM(parseInt(e.target.value)));
 
             const cutSlider = document.getElementById('cut-slider');
             const cutVal = document.getElementById('cut-value');
@@ -423,24 +590,8 @@
                 labelGroup.visible = showLabels;
             });
 
-            document.getElementById('btn-reset').addEventListener('click', () => {
-                bpm = 75;
-                openAmount = 0;
-                bpmSlider.value = 75;
-                cutSlider.value = 0;
-                bpmVal.textContent = "75 BPM";
-                cutVal.textContent = "0%";
-                applyHeartOpening();
-                heartGroup.rotation.set(0, 0, 0);
-            });
-
-            document.getElementById('btn-explode').addEventListener('click', () => {
-                isExploded = !isExploded;
-                openAmount = isExploded ? 0.75 : 0;
-                cutSlider.value = isExploded ? 75 : 0;
-                cutVal.textContent = cutSlider.value + "%";
-                applyHeartOpening();
-            });
+            document.getElementById('btn-reset').addEventListener('click', resetVR);
+            document.getElementById('btn-explode').addEventListener('click', toggleExplodeVR);
         }
 
         function applyHeartOpening() {
@@ -458,14 +609,14 @@
         function animate(time) {
             const sec = time * 0.001;
 
-            // Animació de batec del cor
+            // Batec del Cor
             const bps = bpm / 60;
             const pulse = Math.sin(sec * bps * Math.PI * 2);
             const scale = 1 + Math.max(0, pulse) * 0.07;
 
             if (heartGroup) {
                 heartGroup.scale.set(scale, scale, scale);
-                if (!renderer.xr.isPresenting) {
+                if (!renderer.xr.isPresenting && !grabbedObject) {
                     heartGroup.rotation.y += 0.004;
                 }
             }
