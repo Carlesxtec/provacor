@@ -1,190 +1,491 @@
 <!DOCTYPE html>
-<html lang="ca"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Cor 3D · Meta Quest 3</title>
-<style>
-:root{--bg:#0b0d12;--fg:#eef1f6;--ac:#e5484d;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
-html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,sans-serif;overflow:hidden}
-#ui{position:fixed;left:12px;top:calc(env(safe-area-inset-top,0px) + 12px);max-width:320px;background:rgba(0,0,0,.65);padding:12px 14px;border-radius:12px;font-size:14px;line-height:1.45;z-index:2}
-#ui h1{font-size:17px;margin:0 0 8px}
-#ui button{background:var(--ac);color:#fff;border:0;border-radius:8px;padding:10px 14px;font-size:15px;cursor:pointer;width:100%}
-#ui button:disabled{opacity:.5}
-#ui label{display:block;margin:10px 0 2px}
-#ui input{width:100%}
-#ui p{margin:8px 0 0;opacity:.85}
-</style></head><body>
-<div id="ui">
-<h1>❤ Cor 3D en XR</h1>
-<button id="xr" disabled>Comprovant XR…</button>
-<label for="op">Obertura del cor</label>
-<input id="op" type="range" min="0" max="100" value="0">
-<p id="msg">Mans: pessiga prop del cor per agafar-lo i moure’l. Pessiga amb les dues mans i separa-les per obrir-lo. Amb comandaments: gallet. A l’ordinador: arrossega per girar.</p>
-</div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script>
-const $=id=>document.getElementById(id);
-const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
-renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);
-renderer.xr.enabled=true;renderer.domElement.style.cssText='position:fixed;inset:0';
-document.body.appendChild(renderer.domElement);
-const BG=new THREE.Color(0x0b0d12);
-const scene=new THREE.Scene();scene.background=BG;
-const camera=new THREE.PerspectiveCamera(50,innerWidth/innerHeight,0.01,20);
-camera.position.set(0,1.35,0);camera.lookAt(0,1.35,-0.6);
-scene.add(new THREE.HemisphereLight(0xffffff,0x553333,0.9));
-const dl=new THREE.DirectionalLight(0xffffff,0.8);dl.position.set(1,2,2);scene.add(dl);
+<html lang="ca">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulador de Cor 3D - Meta Quest 3 WebXR</title>
+    <!-- Tailwind CSS per a la interfície 2D -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome per icones -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #05070d;
+            color: #fff;
+            user-select: none;
+        }
+        #webgl-container {
+            width: 100vw;
+            height: 100vh;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+        .glass-panel {
+            background: rgba(18, 24, 38, 0.85);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+        }
+        .pointer-events-auto {
+            pointer-events: auto !important;
+        }
+        /* Contenidor per al botó VR */
+        #vr-btn-container {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            z-index: 999;
+        }
+    </style>
+</head>
+<body class="bg-gray-950 text-white overflow-hidden">
 
-// ---- Cor ----
-const heart=new THREE.Group();heart.position.set(0,1.35,-0.6);scene.add(heart);
-const pulse=new THREE.Group();heart.add(pulse);
-const core=new THREE.Group(),frontG=new THREE.Group();pulse.add(core,frontG);
+    <!-- Canvas principal per WebGL -->
+    <div id="webgl-container"></div>
 
-function shell(front,op){
-  const g=new THREE.SphereGeometry(1,32,24,front?0:Math.PI,Math.PI),p=g.attributes.position;
-  for(let i=0;i<p.count;i++){
-    const x=p.getX(i),y=p.getY(i),z=p.getZ(i),f=y<0?1+0.8*y:1;
-    p.setXYZ(i,x*0.10*f+(y<0?-y*0.035:0),y*0.12,z*0.075*f);
-  }
-  g.computeVertexNormals();
-  return new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:0xc2413d,transparent:true,opacity:op,side:THREE.DoubleSide,roughness:.5,depthWrite:false}));
-}
-core.add(shell(false,0.5));frontG.add(shell(true,0.38));
+    <!-- Botó d'entrada a VR -->
+    <div id="vr-btn-container" class="pointer-events-auto">
+        <button id="start-vr-btn" class="bg-gradient-to-r from-red-600 to-rose-700 hover:from-red-500 hover:to-rose-600 text-white font-bold py-3 px-6 rounded-xl shadow-2xl border border-red-400/50 flex items-center space-x-3 transition cursor-pointer">
+            <i class="fa-solid fa-vr-cardboard text-2xl"></i>
+            <span id="vr-btn-text">ENTRAR EN VR (META QUEST 3)</span>
+        </button>
+    </div>
 
-const chambers=[];
-function ch(col,x,y,z,sx,sy,sz,atr){
-  const m=new THREE.Mesh(new THREE.SphereGeometry(1,24,16),new THREE.MeshStandardMaterial({color:col,roughness:.4,emissive:col,emissiveIntensity:.15,transparent:true,opacity:.45,depthWrite:false}));
-  m.position.set(x,y,z);m.scale.set(sx,sy,sz);core.add(m);
-  chambers.push({m,b:m.scale.clone(),atr});
-}
-const BL=0x3b82f6,RD=0xdc2626;
-ch(BL,-0.05,0.045,0,0.033,0.04,0.03,true);      // aurícula dreta
-ch(BL,-0.025,-0.04,0.015,0.035,0.05,0.028,false); // ventricle dret
-ch(RD,0.05,0.05,-0.025,0.032,0.032,0.03,true);  // aurícula esquerra
-ch(RD,0.035,-0.03,-0.005,0.04,0.065,0.035,false);// ventricle esquerre
+    <!-- UI d'usuari (HUD 2D) -->
+    <div id="ui-layer" class="relative z-20 flex flex-col justify-between h-screen p-4 pointer-events-none">
+        
+        <!-- Capçalera / Títol -->
+        <header class="flex justify-between items-center glass-panel p-4 rounded-2xl pointer-events-auto max-w-4xl mx-auto w-full border-red-900/30">
+            <div class="flex items-center space-x-3">
+                <div class="bg-red-600/20 p-3 rounded-xl border border-red-500/40 text-red-500 animate-pulse">
+                    <i class="fa-solid fa-heart-pulse text-2xl"></i>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold tracking-wide text-red-400">CardioXR: Cor Humà 3D</h1>
+                    <p class="text-xs text-gray-400">Simulador Anatòmic WebXR per Meta Quest 3</p>
+                </div>
+            </div>
+        </header>
 
-const blue=[[-0.065,0.2,-0.005],[-0.055,0.1,0],[-0.05,0.045,0.005],[-0.03,-0.035,0.015],[-0.005,0.05,0.035],[0,0.13,0.04],[0.07,0.2,-0.01]];
-const red=[[0.11,0.12,-0.03],[0.055,0.052,-0.025],[0.035,-0.02,0],[0.025,0.06,-0.01],[0.015,0.15,-0.02],[-0.01,0.22,-0.03],[-0.045,0.2,-0.04],[-0.06,0.12,-0.05]];
-function tube(pts,col){
-  const c=new THREE.CatmullRomCurve3(pts.map(p=>new THREE.Vector3(...p)));
-  core.add(new THREE.Mesh(new THREE.TubeGeometry(c,32,0.011,12),new THREE.MeshStandardMaterial({color:col,roughness:.45,transparent:true,opacity:.6,depthWrite:false})));
-}
-tube(blue.slice(0,3),BL);tube(blue.slice(3),BL);tube(red.slice(0,2),RD);tube(red.slice(3),RD);
+        <!-- Missatge informatiu -->
+        <div id="info-banner" class="glass-panel p-3 rounded-xl max-w-4xl mx-auto w-full border-blue-500/40 text-blue-300 text-xs flex items-center justify-between mb-2 pointer-events-auto">
+            <div class="flex items-center space-x-2">
+                <i class="fa-solid fa-circle-info text-base text-blue-400"></i>
+                <span>Si estàs utilitzant les <strong>Meta Quest 3</strong>, premeu el botó superior dret per entrar en VR i agafar o obrir el cor amb les mans.</span>
+            </div>
+            <button onclick="document.getElementById('info-banner').remove()" class="text-gray-400 hover:text-white px-2"><i class="fa-solid fa-xmark"></i></button>
+        </div>
 
-const flows=[];
-function flow(pts,col){
-  const curve=new THREE.CatmullRomCurve3(pts.map(p=>new THREE.Vector3(...p))),n=70,g=new THREE.BufferGeometry();
-  g.setAttribute('position',new THREE.BufferAttribute(new Float32Array(n*3),3));
-  const m=new THREE.Points(g,new THREE.PointsMaterial({color:col,size:0.006}));m.frustumCulled=false;core.add(m);
-  flows.push({curve,g,n,ts:Array.from({length:n},(_,i)=>i/n)});
-}
-flow(blue,0x9cc7ff);flow(red,0xff8a8a);
+        <!-- Panell Lateral de Controls -->
+        <div class="flex justify-between items-end w-full max-w-6xl mx-auto">
+            
+            <div class="glass-panel p-5 rounded-2xl w-80 space-y-4 pointer-events-auto border-red-900/20 shadow-2xl">
+                <h3 class="font-bold text-sm tracking-wider uppercase text-gray-400 border-b border-gray-700/50 pb-2">
+                    <i class="fa-solid fa-sliders text-red-400 mr-2"></i>Control Anatòmic
+                </h3>
 
-function label(txt,x,y,z){
-  const c=document.createElement('canvas');c.width=256;c.height=64;const g=c.getContext('2d');
-  g.fillStyle='rgba(0,0,0,.6)';g.fillRect(0,0,256,64);g.fillStyle='#fff';g.font='24px sans-serif';g.textAlign='center';g.textBaseline='middle';g.fillText(txt,128,34);
-  const s=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c),depthTest:false}));
-  s.scale.set(0.1,0.025,1);s.position.set(x,y,z);core.add(s);
-}
-label('Aurícula dreta',-0.15,0.06,0.04);label('Ventricle dret',-0.15,-0.06,0.04);
-label('Aurícula esquerra',0.16,0.07,0.04);label('Ventricle esquerre',0.16,-0.05,0.04);
-label('Aorta',-0.11,0.24,-0.03);label('Artèria pulmonar',0.11,0.22,0.03);
+                <!-- Ritme Cardíac (BPM) -->
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <span class="text-gray-300">Ritme Cardíac:</span>
+                        <span id="bpm-value" class="text-red-400 font-bold">75 BPM</span>
+                    </div>
+                    <input type="range" id="bpm-slider" min="30" max="180" value="75" class="w-full accent-red-500 bg-gray-700 rounded-lg h-2 cursor-pointer">
+                </div>
 
-// ---- Obertura ----
-let openV=0;
-function setOpen(v){
-  openV=Math.max(0,Math.min(1,v));
-  frontG.position.set(openV*0.16,0,openV*0.28);frontG.rotation.y=openV*0.7;
-  $('op').value=openV*100;
-}
-$('op').oninput=e=>setOpen(e.target.value/100);
+                <!-- Obertura del Cor -->
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <span class="text-gray-300">Obertura/Secció Anatòmica:</span>
+                        <span id="cut-value" class="text-red-400 font-bold">0%</span>
+                    </div>
+                    <input type="range" id="cut-slider" min="0" max="100" value="0" class="w-full accent-red-500 bg-gray-700 rounded-lg h-2 cursor-pointer">
+                </div>
 
-// ---- Batec ----
-const bump=(p,a,b)=>p>a&&p<b?Math.sin((p-a)/(b-a)*Math.PI):0,v3=new THREE.Vector3();
-function beat(t,dt){
-  const ph=(t%0.833)/0.833,at=bump(ph,0,.15),ve=bump(ph,.17,.5);
-  pulse.scale.setScalar(1+0.025*ve);
-  for(const c of chambers){const k=c.atr?0.2*at:0.25*ve;c.m.scale.set(c.b.x*(1-k),c.b.y*(1-k),c.b.z*(1-k))}
-  const sp=0.08+0.5*(ve+0.5*at);
-  for(const f of flows){
-    const a=f.g.attributes.position.array;
-    for(let i=0;i<f.n;i++){f.ts[i]=(f.ts[i]+dt*sp)%1;f.curve.getPoint(f.ts[i],v3);a[i*3]=v3.x;a[i*3+1]=v3.y;a[i*3+2]=v3.z}
-    f.g.attributes.position.needsUpdate=true;
-  }
-}
+                <!-- Modus de Visualització -->
+                <div class="space-y-2 pt-1">
+                    <label class="flex items-center space-x-2 text-xs text-gray-300 cursor-pointer">
+                        <input type="checkbox" id="toggle-blood" checked class="rounded border-gray-700 text-red-600 focus:ring-red-500">
+                        <span>Mostrar flux sanguini</span>
+                    </label>
+                    <label class="flex items-center space-x-2 text-xs text-gray-300 cursor-pointer">
+                        <input type="checkbox" id="toggle-labels" checked class="rounded border-gray-700 text-red-600 focus:ring-red-500">
+                        <span>Etiquetes anatòmiques</span>
+                    </label>
+                </div>
 
-// ---- Entrada: mans i comandaments ----
-const src=[0,1].map(i=>{
-  const hand=renderer.xr.getHand(i),ctrl=renderer.xr.getController(i);scene.add(hand,ctrl);
-  const o={hand,ctrl,sel:false,pinch:false,pos:new THREE.Vector3(),quat:new THREE.Quaternion()};
-  ctrl.addEventListener('selectstart',()=>o.sel=true);ctrl.addEventListener('selectend',()=>o.sel=false);
-  hand.addEventListener('connected',()=>{for(const n of['thumb-tip','index-finger-tip']){const j=hand.joints[n];if(j)j.add(new THREE.Mesh(new THREE.SphereGeometry(0.007,12,8),new THREE.MeshBasicMaterial({color:0xffffff})))}});
-  return o;
-});
-const t1=new THREE.Vector3(),t2=new THREE.Vector3();
-function readSrc(o){
-  const j=o.hand.joints||{},t=j['thumb-tip'],ix=j['index-finger-tip'],w=j['wrist'];
-  if(t&&ix&&w&&t.visible&&ix.visible&&w.visible){
-    o.hand.visible=true;t.getWorldPosition(t1);ix.getWorldPosition(t2);
-    o.pinch=t1.distanceTo(t2)<(o.pinch?0.035:0.022);
-    o.pos.copy(t1).add(t2).multiplyScalar(.5);w.getWorldQuaternion(o.quat);
-  }else{
-    o.pinch=o.sel;
-    if(o.sel){o.ctrl.getWorldPosition(o.pos);o.ctrl.getWorldQuaternion(o.quat)}
-  }
-}
-let mode=0,gs=null,d0=0,o0=0;
-const qi=new THREE.Quaternion(),gq=new THREE.Quaternion(),goff=new THREE.Vector3();
-function interact(){
-  const p=src.filter(s=>s.pinch);
-  if(p.length>=2){
-    const d=p[0].pos.distanceTo(p[1].pos);
-    if(mode!==2){mode=2;d0=d;o0=openV}
-    setOpen(o0+(d-d0)/0.35);
-  }else if(p.length===1){
-    const s=p[0];
-    if(mode!==1||gs!==s){
-      if(s.pos.distanceTo(heart.position)<0.3){
-        mode=1;gs=s;qi.copy(s.quat).invert();
-        goff.copy(heart.position).sub(s.pos).applyQuaternion(qi);
-        gq.copy(qi).multiply(heart.quaternion);
-      }else mode=0;
-    }
-    if(mode===1){heart.quaternion.copy(s.quat).multiply(gq);heart.position.copy(goff).applyQuaternion(s.quat).add(s.pos)}
-  }else mode=0;
-}
+                <!-- Botons d'Acció -->
+                <div class="grid grid-cols-2 gap-2 pt-2">
+                    <button id="btn-reset" class="bg-gray-800 hover:bg-gray-700 text-xs py-2 px-3 rounded-lg border border-gray-600 text-gray-200 transition">
+                        <i class="fa-solid fa-rotate-left mr-1"></i>Reiniciar
+                    </button>
+                    <button id="btn-explode" class="bg-red-950/60 hover:bg-red-900/80 border border-red-700/50 text-red-300 text-xs py-2 px-3 rounded-lg transition">
+                        <i class="fa-solid fa-layer-group mr-1"></i>Obrir Cor
+                    </button>
+                </div>
+            </div>
 
-// ---- Escriptori: girar amb el ratolí ----
-let drag=false,px=0,py=0;const cv=renderer.domElement;
-cv.onpointerdown=e=>{drag=true;px=e.clientX;py=e.clientY};
-addEventListener('pointerup',()=>drag=false);
-addEventListener('pointermove',e=>{if(drag&&!renderer.xr.isPresenting){heart.rotation.y+=(e.clientX-px)*0.01;heart.rotation.x+=(e.clientY-py)*0.01;px=e.clientX;py=e.clientY}});
-addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+            <!-- Instruccions -->
+            <div class="glass-panel p-5 rounded-2xl max-w-sm pointer-events-auto border-red-900/20 text-xs space-y-3 hidden md:block">
+                <h3 class="font-bold text-sm text-red-400 flex items-center">
+                    <i class="fa-solid fa-hand-pointer mr-2"></i> Com utilitzar a Meta Quest 3:
+                </h3>
+                <ol class="space-y-1.5 text-gray-300 list-decimal list-inside">
+                    <li>Obre aquesta pàgina al <strong>Meta Quest Browser</strong>.</li>
+                    <li>Fes clic al botó vermell superior <strong>"ENTRAR EN VR"</strong>.</li>
+                    <li>Junta l'índex i el polze (pinça) per agafar i moure el cor.</li>
+                </ol>
+            </div>
+        </div>
+    </div>
 
-// ---- Sessió XR ----
-let xrMode=null;const btn=$('xr');
-(async()=>{
-  try{
-    if(navigator.xr){
-      if(await navigator.xr.isSessionSupported('immersive-ar'))xrMode='immersive-ar';
-      else if(await navigator.xr.isSessionSupported('immersive-vr'))xrMode='immersive-vr';
-    }
-  }catch(e){}
-  btn.textContent=xrMode==='immersive-ar'?'Entrar en realitat mixta':xrMode?'Entrar en VR':'XR no disponible (obre-ho a les Quest 3)';
-  btn.disabled=!xrMode;
-})();
-btn.onclick=async()=>{
-  try{
-    const s=await navigator.xr.requestSession(xrMode,{optionalFeatures:['hand-tracking','local-floor']});
-    renderer.xr.setSession(s);
-  }catch(e){$('msg').textContent='No s’ha pogut iniciar XR: '+e.message}
-};
-renderer.xr.addEventListener('sessionstart',()=>{scene.background=xrMode==='immersive-ar'?null:BG;$('ui').style.display='none'});
-renderer.xr.addEventListener('sessionend',()=>{scene.background=BG;$('ui').style.display='block'});
+    <!-- Import Map actualitzat per Three.js v0.160 -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
 
-let last=0;
-renderer.setAnimationLoop(time=>{
-  const t=time/1000,dt=Math.min(t-last,0.1);last=t;
-  if(renderer.xr.isPresenting){src.forEach(readSrc);interact()}
-  beat(t,dt);renderer.render(scene,camera);
-});
-</script></body></html>
+    <!-- Script Principal WebXR -->
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
+
+        let scene, camera, renderer, controls;
+        let heartGroup, leftHalf, rightHalf, bloodGroup, labelGroup;
+        
+        let bpm = 75;
+        let openAmount = 0;
+        let showBlood = true;
+        let showLabels = true;
+        let isExploded = false;
+
+        init();
+
+        function init() {
+            const container = document.getElementById('webgl-container');
+
+            // 1. Escena 3D
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x070a12);
+
+            // 2. Càmera
+            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 50);
+            camera.position.set(0, 1.3, 1.0);
+
+            // 3. Renderitzador WebGL + WebXR
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.xr.enabled = true;
+            container.appendChild(renderer.domElement);
+
+            // 4. OrbitControls per a pantalles convencionals
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.target.set(0, 1.2, 0);
+
+            // 5. Llums
+            const ambientLight = new THREE.AmbientLight(0xffffff, 2.0);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+            dirLight.position.set(2, 4, 3);
+            scene.add(dirLight);
+
+            // 6. Element de suport / Pedestal
+            const grid = new THREE.GridHelper(6, 12, 0xef4444, 0x1f2937);
+            scene.add(grid);
+
+            // 7. Models 3D del Cor
+            buildHeartModel();
+            buildBloodSystem();
+            buildLabels();
+
+            // 8. Controladors de mans i comandaments de Meta Quest
+            setupXRInputs();
+
+            // 9. Botó VR
+            setupVRButton();
+
+            // Events UI
+            setupUI();
+
+            window.addEventListener('resize', onResize);
+            renderer.setAnimationLoop(animate);
+        }
+
+        function setupVRButton() {
+            const vrBtn = document.getElementById('start-vr-btn');
+            const vrText = document.getElementById('vr-btn-text');
+
+            if ('xr' in navigator) {
+                navigator.xr.isSessionSupported('immersive-vr').then((supported) => {
+                    if (!supported) {
+                        vrText.textContent = "VR NO DISPONIBLE EN AQUEST NAVEGADOR";
+                        vrBtn.classList.add('opacity-50');
+                    }
+                });
+            } else {
+                vrText.textContent = "WEBXR NO DETECTAT (CAL HTTPS / QUEST BROWSER)";
+            }
+
+            vrBtn.addEventListener('click', async () => {
+                if (!navigator.xr) {
+                    alert("Per fer servir les teves Meta Quest 3, obre aquest enllaç directament des del Meta Quest Browser.");
+                    return;
+                }
+
+                if (renderer.xr.isPresenting) {
+                    const session = renderer.xr.getSession();
+                    if (session) await session.end();
+                } else {
+                    try {
+                        let session;
+                        try {
+                            session = await navigator.xr.requestSession('immersive-vr', {
+                                optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking']
+                            });
+                        } catch (e) {
+                            session = await navigator.xr.requestSession('immersive-vr', {
+                                optionalFeatures: ['local-floor']
+                            });
+                        }
+
+                        renderer.xr.setSession(session);
+                        vrText.textContent = "SORTIR DE VR";
+
+                        session.addEventListener('end', () => {
+                            vrText.textContent = "ENTRAR EN VR (META QUEST 3)";
+                        });
+                    } catch (err) {
+                        alert("No s'ha pogut iniciar la sessió VR: " + err.message);
+                    }
+                }
+            });
+        }
+
+        function buildHeartModel() {
+            heartGroup = new THREE.Group();
+            heartGroup.position.set(0, 1.25, 0);
+            scene.add(heartGroup);
+
+            leftHalf = new THREE.Group();
+            rightHalf = new THREE.Group();
+            heartGroup.add(leftHalf);
+            heartGroup.add(rightHalf);
+
+            // Material del Cor
+            const matLeft = new THREE.MeshStandardMaterial({
+                color: 0xdc2626,
+                roughness: 0.3,
+                metalness: 0.1
+            });
+
+            const matRight = new THREE.MeshStandardMaterial({
+                color: 0xb91c1c,
+                roughness: 0.3,
+                metalness: 0.1
+            });
+
+            // Ventricle / Aurícula Esquerra
+            const leftGeom = new THREE.SphereGeometry(0.16, 32, 32);
+            leftGeom.scale(0.85, 1.25, 0.85);
+            const leftMesh = new THREE.Mesh(leftGeom, matLeft);
+            leftMesh.position.set(-0.06, 0, 0);
+            leftHalf.add(leftMesh);
+
+            // Ventricle / Aurícula Dreta
+            const rightGeom = new THREE.SphereGeometry(0.15, 32, 32);
+            rightGeom.scale(0.8, 1.2, 0.8);
+            const rightMesh = new THREE.Mesh(rightGeom, matRight);
+            rightMesh.position.set(0.06, 0, 0);
+            rightHalf.add(rightMesh);
+
+            // Aorta
+            const aortaMat = new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.2 });
+            const aortaCurve = new THREE.CatmullRomCurve3([
+                new THREE.Vector3(-0.02, 0.1, 0),
+                new THREE.Vector3(-0.02, 0.24, 0),
+                new THREE.Vector3(0.05, 0.26, 0.02),
+                new THREE.Vector3(0.08, 0.18, -0.02)
+            ]);
+            const aortaGeom = new THREE.TubeGeometry(aortaCurve, 20, 0.032, 16, false);
+            const aorta = new THREE.Mesh(aortaGeom, aortaMat);
+            leftHalf.add(aorta);
+
+            // Vena Cava
+            const venaMat = new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.2 });
+            const venaGeom = new THREE.CylinderGeometry(0.028, 0.028, 0.2, 16);
+            const vena = new THREE.Mesh(venaGeom, venaMat);
+            vena.position.set(0.1, 0.16, -0.02);
+            rightHalf.add(vena);
+        }
+
+        function buildBloodSystem() {
+            bloodGroup = new THREE.Group();
+            heartGroup.add(bloodGroup);
+
+            const redMat = new THREE.MeshBasicMaterial({ color: 0xf87171 });
+            const blueMat = new THREE.MeshBasicMaterial({ color: 0x60a5fa });
+            const geom = new THREE.SphereGeometry(0.007, 8, 8);
+
+            for (let i = 0; i < 50; i++) {
+                const isOx = i % 2 === 0;
+                const p = new THREE.Mesh(geom, isOx ? redMat : blueMat);
+                p.userData = { offset: i * 0.1, isOx: isOx };
+                bloodGroup.add(p);
+            }
+        }
+
+        function buildLabels() {
+            labelGroup = new THREE.Group();
+            heartGroup.add(labelGroup);
+
+            const items = [
+                { name: "AORTA", pos: new THREE.Vector3(0.08, 0.27, 0.02) },
+                { name: "VENA CAVA", pos: new THREE.Vector3(0.14, 0.18, -0.02) },
+                { name: "VENTRICLE ESQUERRE", pos: new THREE.Vector3(-0.15, -0.05, 0.08) },
+                { name: "VENTRICLE DRET", pos: new THREE.Vector3(0.15, -0.05, 0.08) }
+            ];
+
+            items.forEach(item => {
+                const canvas = document.createElement('canvas');
+                canvas.width = 200;
+                canvas.height = 50;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = "rgba(15, 23, 42, 0.9)";
+                ctx.fillRect(0, 0, 200, 50);
+                ctx.strokeStyle = "#ef4444";
+                ctx.lineWidth = 3;
+                ctx.strokeRect(2, 2, 196, 46);
+                ctx.fillStyle = "#ffffff";
+                ctx.font = "bold 16px sans-serif";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillText(item.name, 100, 25);
+
+                const tex = new THREE.CanvasTexture(canvas);
+                const spriteMat = new THREE.SpriteMaterial({ map: tex });
+                const sprite = new THREE.Sprite(spriteMat);
+                sprite.position.copy(item.pos);
+                sprite.scale.set(0.2, 0.05, 1);
+                labelGroup.add(sprite);
+            });
+        }
+
+        function setupXRInputs() {
+            const handModelFactory = new XRHandModelFactory();
+
+            // Hand 1
+            const hand1 = renderer.xr.getHand(0);
+            hand1.add(handModelFactory.createHandModel(hand1, "mesh"));
+            scene.add(hand1);
+
+            // Hand 2
+            const hand2 = renderer.xr.getHand(1);
+            hand2.add(handModelFactory.createHandModel(hand2, "mesh"));
+            scene.add(hand2);
+        }
+
+        function setupUI() {
+            const bpmSlider = document.getElementById('bpm-slider');
+            const bpmVal = document.getElementById('bpm-value');
+            bpmSlider.addEventListener('input', (e) => {
+                bpm = parseInt(e.target.value);
+                bpmVal.textContent = bpm + " BPM";
+            });
+
+            const cutSlider = document.getElementById('cut-slider');
+            const cutVal = document.getElementById('cut-value');
+            cutSlider.addEventListener('input', (e) => {
+                openAmount = parseInt(e.target.value) / 100;
+                cutVal.textContent = e.target.value + "%";
+                applyHeartOpening();
+            });
+
+            document.getElementById('toggle-blood').addEventListener('change', (e) => {
+                showBlood = e.target.checked;
+                bloodGroup.visible = showBlood;
+            });
+
+            document.getElementById('toggle-labels').addEventListener('change', (e) => {
+                showLabels = e.target.checked;
+                labelGroup.visible = showLabels;
+            });
+
+            document.getElementById('btn-reset').addEventListener('click', () => {
+                bpm = 75;
+                openAmount = 0;
+                bpmSlider.value = 75;
+                cutSlider.value = 0;
+                bpmVal.textContent = "75 BPM";
+                cutVal.textContent = "0%";
+                applyHeartOpening();
+                heartGroup.rotation.set(0, 0, 0);
+            });
+
+            document.getElementById('btn-explode').addEventListener('click', () => {
+                isExploded = !isExploded;
+                openAmount = isExploded ? 0.75 : 0;
+                cutSlider.value = isExploded ? 75 : 0;
+                cutVal.textContent = cutSlider.value + "%";
+                applyHeartOpening();
+            });
+        }
+
+        function applyHeartOpening() {
+            const shift = openAmount * 0.16;
+            leftHalf.position.x = -shift;
+            rightHalf.position.x = shift;
+        }
+
+        function onResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate(time) {
+            const sec = time * 0.001;
+
+            // Animació de batec del cor
+            const bps = bpm / 60;
+            const pulse = Math.sin(sec * bps * Math.PI * 2);
+            const scale = 1 + Math.max(0, pulse) * 0.07;
+
+            if (heartGroup) {
+                heartGroup.scale.set(scale, scale, scale);
+                if (!renderer.xr.isPresenting) {
+                    heartGroup.rotation.y += 0.004;
+                }
+            }
+
+            // Partícules de sang
+            if (bloodGroup && showBlood) {
+                bloodGroup.children.forEach((p, idx) => {
+                    const t = (sec * 0.5 + p.userData.offset) % 1;
+                    const side = p.userData.isOx ? leftHalf.position.x - 0.04 : rightHalf.position.x + 0.04;
+                    p.position.set(
+                        side + Math.sin(t * Math.PI * 2) * 0.03,
+                        (t - 0.5) * 0.28,
+                        Math.cos(t * Math.PI * 2) * 0.03
+                    );
+                });
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
