@@ -336,10 +336,11 @@
             bloodGroup = new THREE.Group();
             heartGroup.add(bloodGroup);
 
-            const pCount = 40;
-            const geom = new THREE.SphereGeometry(0.008, 8, 8);
-            const oxMat = new THREE.MeshBasicMaterial({ color: 0xff3333 });
-            const deOxMat = new THREE.MeshBasicMaterial({ color: 0x3366ff });
+            const pCount = 50;
+            // Augmentem la mida de les partícules perquè es vegin clarament
+            const geom = new THREE.SphereGeometry(0.015, 12, 12);
+            const oxMat = new THREE.MeshBasicMaterial({ color: 0xff1111 });
+            const deOxMat = new THREE.MeshBasicMaterial({ color: 0x1177ff });
 
             for (let i = 0; i < pCount; i++) {
                 const isOx = i % 2 === 0;
@@ -477,10 +478,12 @@
                 scene.add(controller);
                 controllers.push(controller);
 
-                const lineGeom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -2)]);
-                const lineMat = new THREE.LineBasicMaterial({ color: 0xef4444, linewidth: 2 });
+                // No afegim la línia vermella directament per defecte per no molestar en Hand Tracking
+                const lineGeom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]);
+                const lineMat = new THREE.LineBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.2 });
                 const line = new THREE.Line(lineGeom, lineMat);
                 line.name = 'rayline';
+                line.visible = false; // Desactivat per defecte per netejar la visió
                 controller.add(line);
             }
 
@@ -492,6 +495,46 @@
                 hand.addEventListener('pinchend', onSelectEnd);
                 scene.add(hand);
                 hands.push(hand);
+            }
+        }
+
+        function onSelectStart(event) {
+            const controller = event.target;
+
+            tempMatrix.identity().extractRotation(controller.matrixWorld);
+            raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+            raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+
+            // 1. Comprovar si es clica un botó del panell VR
+            const btnIntersects = raycaster.intersectObjects(vrButtons, true);
+            if (btnIntersects.length > 0) {
+                let target = btnIntersects[0].object;
+                while (target && !target.userData.isVRBtn && target.parent) {
+                    target = target.parent;
+                }
+                if (target && target.userData.action) {
+                    target.userData.action();
+                    target.scale.set(0.9, 0.9, 0.9);
+                    setTimeout(() => target.scale.set(1, 1, 1), 150);
+                    return;
+                }
+            }
+
+            // 2. Distància de captura directa per les MANS o el comandament
+            controller.getWorldPosition(tempVector);
+            const heartWorldPos = new THREE.Vector3();
+            heartGroup.getWorldPosition(heartWorldPos);
+            const dist = tempVector.distanceTo(heartWorldPos);
+
+            // Augmentem el rang de detecció per a agafar fàcilment amb les mans
+            if (dist < 0.50) {
+                activeGrabs.set(controller, {
+                    parent: heartGroup.parent,
+                    position: heartGroup.position.clone(),
+                    rotation: heartGroup.rotation.clone()
+                });
+                controller.add(heartGroup);
+                heartHitbox.material.opacity = 0.2;
             }
         }
 
@@ -639,21 +682,24 @@
 
             if (renderer.xr.isPresenting && activeGrabs.size === 0) {
                 let near = false;
+                const heartPos = new THREE.Vector3();
+                heartGroup.getWorldPosition(heartPos);
+
                 [...controllers, ...hands].forEach(input => {
                     input.getWorldPosition(tempVector);
-                    if (tempVector.distanceTo(heartGroup.position) < 0.35) near = true;
+                    if (tempVector.distanceTo(heartPos) < 0.45) near = true;
                 });
-                heartHitbox.material.opacity = near ? 0.15 : 0.0;
+                heartHitbox.material.opacity = near ? 0.2 : 0.0;
             }
 
             if (bloodGroup && showBlood) {
                 bloodGroup.children.forEach((p) => {
-                    const t = (sec * 0.5 + p.userData.offset) % 1;
+                    const t = (sec * 0.6 + p.userData.offset) % 1;
                     const side = p.userData.isOx ? leftHalf.position.x - 0.04 : rightHalf.position.x + 0.04;
                     p.position.set(
-                        side + Math.sin(t * Math.PI * 2) * 0.03,
-                        (t - 0.5) * 0.28,
-                        Math.cos(t * Math.PI * 2) * 0.03
+                        side + Math.sin(t * Math.PI * 2) * 0.04,
+                        (t - 0.5) * 0.32,
+                        Math.cos(t * Math.PI * 2) * 0.04
                     );
                 });
             }
