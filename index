@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="ca"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cor 3D · Meta Quest 3</title>
+<style>
+:root{--bg:#0b0d12;--fg:#eef1f6;--ac:#e5484d;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,sans-serif;overflow:hidden}
+#ui{position:fixed;left:12px;top:calc(env(safe-area-inset-top,0px) + 12px);max-width:320px;background:rgba(0,0,0,.65);padding:12px 14px;border-radius:12px;font-size:14px;line-height:1.45;z-index:2}
+#ui h1{font-size:17px;margin:0 0 8px}
+#ui button{background:var(--ac);color:#fff;border:0;border-radius:8px;padding:10px 14px;font-size:15px;cursor:pointer;width:100%}
+#ui button:disabled{opacity:.5}
+#ui label{display:block;margin:10px 0 2px}
+#ui input{width:100%}
+#ui p{margin:8px 0 0;opacity:.85}
+</style></head><body>
+<div id="ui">
+<h1>❤ Cor 3D en XR</h1>
+<button id="xr" disabled>Comprovant XR…</button>
+<label for="op">Obertura del cor</label>
+<input id="op" type="range" min="0" max="100" value="0">
+<p id="msg">Mans: pessiga prop del cor per agafar-lo i moure’l. Pessiga amb les dues mans i separa-les per obrir-lo. Amb comandaments: gallet. A l’ordinador: arrossega per girar.</p>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);
+renderer.xr.enabled=true;renderer.domElement.style.cssText='position:fixed;inset:0';
+document.body.appendChild(renderer.domElement);
+const BG=new THREE.Color(0x0b0d12);
+const scene=new THREE.Scene();scene.background=BG;
+const camera=new THREE.PerspectiveCamera(50,innerWidth/innerHeight,0.01,20);
+camera.position.set(0,1.35,0);camera.lookAt(0,1.35,-0.6);
+scene.add(new THREE.HemisphereLight(0xffffff,0x553333,0.9));
+const dl=new THREE.DirectionalLight(0xffffff,0.8);dl.position.set(1,2,2);scene.add(dl);
+
+// ---- Cor ----
+const heart=new THREE.Group();heart.position.set(0,1.35,-0.6);scene.add(heart);
+const pulse=new THREE.Group();heart.add(pulse);
+const core=new THREE.Group(),frontG=new THREE.Group();pulse.add(core,frontG);
+
+function shell(front,op){
+  const g=new THREE.SphereGeometry(1,32,24,front?0:Math.PI,Math.PI),p=g.attributes.position;
+  for(let i=0;i<p.count;i++){
+    const x=p.getX(i),y=p.getY(i),z=p.getZ(i),f=y<0?1+0.8*y:1;
+    p.setXYZ(i,x*0.10*f+(y<0?-y*0.035:0),y*0.12,z*0.075*f);
+  }
+  g.computeVertexNormals();
+  return new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:0xc2413d,transparent:true,opacity:op,side:THREE.DoubleSide,roughness:.5,depthWrite:false}));
+}
+core.add(shell(false,0.5));frontG.add(shell(true,0.38));
+
+const chambers=[];
+function ch(col,x,y,z,sx,sy,sz,atr){
+  const m=new THREE.Mesh(new THREE.SphereGeometry(1,24,16),new THREE.MeshStandardMaterial({color:col,roughness:.4,emissive:col,emissiveIntensity:.15,transparent:true,opacity:.45,depthWrite:false}));
+  m.position.set(x,y,z);m.scale.set(sx,sy,sz);core.add(m);
+  chambers.push({m,b:m.scale.clone(),atr});
+}
+const BL=0x3b82f6,RD=0xdc2626;
+ch(BL,-0.05,0.045,0,0.033,0.04,0.03,true);      // aurícula dreta
+ch(BL,-0.025,-0.04,0.015,0.035,0.05,0.028,false); // ventricle dret
+ch(RD,0.05,0.05,-0.025,0.032,0.032,0.03,true);  // aurícula esquerra
+ch(RD,0.035,-0.03,-0.005,0.04,0.065,0.035,false);// ventricle esquerre
+
+const blue=[[-0.065,0.2,-0.005],[-0.055,0.1,0],[-0.05,0.045,0.005],[-0.03,-0.035,0.015],[-0.005,0.05,0.035],[0,0.13,0.04],[0.07,0.2,-0.01]];
+const red=[[0.11,0.12,-0.03],[0.055,0.052,-0.025],[0.035,-0.02,0],[0.025,0.06,-0.01],[0.015,0.15,-0.02],[-0.01,0.22,-0.03],[-0.045,0.2,-0.04],[-0.06,0.12,-0.05]];
+function tube(pts,col){
+  const c=new THREE.CatmullRomCurve3(pts.map(p=>new THREE.Vector3(...p)));
+  core.add(new THREE.Mesh(new THREE.TubeGeometry(c,32,0.011,12),new THREE.MeshStandardMaterial({color:col,roughness:.45,transparent:true,opacity:.6,depthWrite:false})));
+}
+tube(blue.slice(0,3),BL);tube(blue.slice(3),BL);tube(red.slice(0,2),RD);tube(red.slice(3),RD);
+
+const flows=[];
+function flow(pts,col){
+  const curve=new THREE.CatmullRomCurve3(pts.map(p=>new THREE.Vector3(...p))),n=70,g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(new Float32Array(n*3),3));
+  const m=new THREE.Points(g,new THREE.PointsMaterial({color:col,size:0.006}));m.frustumCulled=false;core.add(m);
+  flows.push({curve,g,n,ts:Array.from({length:n},(_,i)=>i/n)});
+}
+flow(blue,0x9cc7ff);flow(red,0xff8a8a);
+
+function label(txt,x,y,z){
+  const c=document.createElement('canvas');c.width=256;c.height=64;const g=c.getContext('2d');
+  g.fillStyle='rgba(0,0,0,.6)';g.fillRect(0,0,256,64);g.fillStyle='#fff';g.font='24px sans-serif';g.textAlign='center';g.textBaseline='middle';g.fillText(txt,128,34);
+  const s=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c),depthTest:false}));
+  s.scale.set(0.1,0.025,1);s.position.set(x,y,z);core.add(s);
+}
+label('Aurícula dreta',-0.15,0.06,0.04);label('Ventricle dret',-0.15,-0.06,0.04);
+label('Aurícula esquerra',0.16,0.07,0.04);label('Ventricle esquerre',0.16,-0.05,0.04);
+label('Aorta',-0.11,0.24,-0.03);label('Artèria pulmonar',0.11,0.22,0.03);
+
+// ---- Obertura ----
+let openV=0;
+function setOpen(v){
+  openV=Math.max(0,Math.min(1,v));
+  frontG.position.set(openV*0.16,0,openV*0.28);frontG.rotation.y=openV*0.7;
+  $('op').value=openV*100;
+}
+$('op').oninput=e=>setOpen(e.target.value/100);
+
+// ---- Batec ----
+const bump=(p,a,b)=>p>a&&p<b?Math.sin((p-a)/(b-a)*Math.PI):0,v3=new THREE.Vector3();
+function beat(t,dt){
+  const ph=(t%0.833)/0.833,at=bump(ph,0,.15),ve=bump(ph,.17,.5);
+  pulse.scale.setScalar(1+0.025*ve);
+  for(const c of chambers){const k=c.atr?0.2*at:0.25*ve;c.m.scale.set(c.b.x*(1-k),c.b.y*(1-k),c.b.z*(1-k))}
+  const sp=0.08+0.5*(ve+0.5*at);
+  for(const f of flows){
+    const a=f.g.attributes.position.array;
+    for(let i=0;i<f.n;i++){f.ts[i]=(f.ts[i]+dt*sp)%1;f.curve.getPoint(f.ts[i],v3);a[i*3]=v3.x;a[i*3+1]=v3.y;a[i*3+2]=v3.z}
+    f.g.attributes.position.needsUpdate=true;
+  }
+}
+
+// ---- Entrada: mans i comandaments ----
+const src=[0,1].map(i=>{
+  const hand=renderer.xr.getHand(i),ctrl=renderer.xr.getController(i);scene.add(hand,ctrl);
+  const o={hand,ctrl,sel:false,pinch:false,pos:new THREE.Vector3(),quat:new THREE.Quaternion()};
+  ctrl.addEventListener('selectstart',()=>o.sel=true);ctrl.addEventListener('selectend',()=>o.sel=false);
+  hand.addEventListener('connected',()=>{for(const n of['thumb-tip','index-finger-tip']){const j=hand.joints[n];if(j)j.add(new THREE.Mesh(new THREE.SphereGeometry(0.007,12,8),new THREE.MeshBasicMaterial({color:0xffffff})))}});
+  return o;
+});
+const t1=new THREE.Vector3(),t2=new THREE.Vector3();
+function readSrc(o){
+  const j=o.hand.joints||{},t=j['thumb-tip'],ix=j['index-finger-tip'],w=j['wrist'];
+  if(t&&ix&&w&&t.visible&&ix.visible&&w.visible){
+    o.hand.visible=true;t.getWorldPosition(t1);ix.getWorldPosition(t2);
+    o.pinch=t1.distanceTo(t2)<(o.pinch?0.035:0.022);
+    o.pos.copy(t1).add(t2).multiplyScalar(.5);w.getWorldQuaternion(o.quat);
+  }else{
+    o.pinch=o.sel;
+    if(o.sel){o.ctrl.getWorldPosition(o.pos);o.ctrl.getWorldQuaternion(o.quat)}
+  }
+}
+let mode=0,gs=null,d0=0,o0=0;
+const qi=new THREE.Quaternion(),gq=new THREE.Quaternion(),goff=new THREE.Vector3();
+function interact(){
+  const p=src.filter(s=>s.pinch);
+  if(p.length>=2){
+    const d=p[0].pos.distanceTo(p[1].pos);
+    if(mode!==2){mode=2;d0=d;o0=openV}
+    setOpen(o0+(d-d0)/0.35);
+  }else if(p.length===1){
+    const s=p[0];
+    if(mode!==1||gs!==s){
+      if(s.pos.distanceTo(heart.position)<0.3){
+        mode=1;gs=s;qi.copy(s.quat).invert();
+        goff.copy(heart.position).sub(s.pos).applyQuaternion(qi);
+        gq.copy(qi).multiply(heart.quaternion);
+      }else mode=0;
+    }
+    if(mode===1){heart.quaternion.copy(s.quat).multiply(gq);heart.position.copy(goff).applyQuaternion(s.quat).add(s.pos)}
+  }else mode=0;
+}
+
+// ---- Escriptori: girar amb el ratolí ----
+let drag=false,px=0,py=0;const cv=renderer.domElement;
+cv.onpointerdown=e=>{drag=true;px=e.clientX;py=e.clientY};
+addEventListener('pointerup',()=>drag=false);
+addEventListener('pointermove',e=>{if(drag&&!renderer.xr.isPresenting){heart.rotation.y+=(e.clientX-px)*0.01;heart.rotation.x+=(e.clientY-py)*0.01;px=e.clientX;py=e.clientY}});
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+
+// ---- Sessió XR ----
+let xrMode=null;const btn=$('xr');
+(async()=>{
+  try{
+    if(navigator.xr){
+      if(await navigator.xr.isSessionSupported('immersive-ar'))xrMode='immersive-ar';
+      else if(await navigator.xr.isSessionSupported('immersive-vr'))xrMode='immersive-vr';
+    }
+  }catch(e){}
+  btn.textContent=xrMode==='immersive-ar'?'Entrar en realitat mixta':xrMode?'Entrar en VR':'XR no disponible (obre-ho a les Quest 3)';
+  btn.disabled=!xrMode;
+})();
+btn.onclick=async()=>{
+  try{
+    const s=await navigator.xr.requestSession(xrMode,{optionalFeatures:['hand-tracking','local-floor']});
+    renderer.xr.setSession(s);
+  }catch(e){$('msg').textContent='No s’ha pogut iniciar XR: '+e.message}
+};
+renderer.xr.addEventListener('sessionstart',()=>{scene.background=xrMode==='immersive-ar'?null:BG;$('ui').style.display='none'});
+renderer.xr.addEventListener('sessionend',()=>{scene.background=BG;$('ui').style.display='block'});
+
+let last=0;
+renderer.setAnimationLoop(time=>{
+  const t=time/1000,dt=Math.min(t-last,0.1);last=t;
+  if(renderer.xr.isPresenting){src.forEach(readSrc);interact()}
+  beat(t,dt);renderer.render(scene,camera);
+});
+</script></body></html>
